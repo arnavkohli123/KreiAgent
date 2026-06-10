@@ -66,6 +66,11 @@ def init_db():
     SQLite is a file-based database — no server needed, just a .db file on disk.
     The PRIMARY KEY on crexi_id means inserting a duplicate ID silently does nothing.
     """
+    # Create the directory if it doesn't exist (e.g. /data on Railway before
+    # the Volume is mounted, or a local path that hasn't been created yet).
+    db_dir = os.path.dirname(DB_PATH)
+    if db_dir:
+        os.makedirs(db_dir, exist_ok=True)
     conn = sqlite3.connect(DB_PATH)
     conn.execute("""
         CREATE TABLE IF NOT EXISTS listings (
