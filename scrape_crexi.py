@@ -15,6 +15,7 @@ it inherits the session cookies and headers — Cloudflare can't tell the differ
 import asyncio
 import json
 import os
+import random
 import sqlite3
 from datetime import datetime, timezone
 
@@ -154,8 +155,24 @@ async def fetch_all_pages() -> list[dict]:
     all_raw: list[dict] = []
     session_ready = asyncio.Event()  # signals when the browser session is live
 
+    # Residential proxy support — set PLAYWRIGHT_PROXY_SERVER in Railway env vars
+    # to route traffic through a home IP (bypasses data-center IP blocking).
+    # Format: "http://user:pass@host:port"  or  "http://host:port"
+    # Leave unset to connect directly (works from a home/office IP, not data centers).
+    proxy_server = os.getenv("PLAYWRIGHT_PROXY_SERVER")
+    proxy_config = {"server": proxy_server} if proxy_server else None
+    if proxy_server:
+        print(f"[browser] Using proxy: {proxy_server.split('@')[-1]}")  # hide credentials in log
+
     async with async_playwright() as pw:
-        browser = await pw.chromium.launch(headless=True)
+        browser = await pw.chromium.launch(
+            headless=True,
+            proxy=proxy_config,
+            args=[
+                "--no-sandbox",
+                "--disable-blink-features=AutomationControlled",
+            ],
+        )
         context = await browser.new_context(
             user_agent=(
                 "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
@@ -163,6 +180,15 @@ async def fetch_all_pages() -> list[dict]:
                 "Chrome/124.0.0.0 Safari/537.36"
             ),
             viewport={"width": 1440, "height": 900},
+            locale="en-US",
+            timezone_id="America/New_York",
+            # Pretend the browser has permission to show notifications and location
+            # (a real user's browser has these; a bare headless one doesn't)
+            permissions=["geolocation", "notifications"],
+            extra_http_headers={
+                "Accept-Language": "en-US,en;q=0.9",
+                "Accept-Encoding": "gzip, deflate, br",
+            },
         )
         page = await context.new_page()
         await Stealth().apply_stealth_async(page)
@@ -248,7 +274,8 @@ async def fetch_all_pages() -> list[dict]:
                 items = result.get("data", []) if isinstance(result, dict) else []
                 print(f"[page {page_num}] Got {len(items)} listings")
                 all_raw.extend(items)
-                await asyncio.sleep(0.5)  # be polite, don't hammer the API
+                # Random human-paced delay between requests (1.5–4 seconds)
+                await asyncio.sleep(random.uniform(1.5, 4.0))
             except Exception as e:
                 print(f"[page {page_num}] Error: {e}")
                 break
